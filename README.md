@@ -47,6 +47,9 @@
 - ✅ **OpenWrt 22.03** (兼容)
 - ⚠️ **OpenWrt 21.02** (需要手动安装 nftables)
 
+### ⚠️ 重要兼容性说明
+本应用基于经典LuCI (Lua版本)开发。OpenWrt 23.05及以后版本默认使用新版LuCI (ucode版本)，需要安装`luci-compat`包才能正常运行。安装本应用时会自动安装`luci-compat`依赖。
+
 ### 硬件要求
 - **RAM**: 最小 64MB (推荐 128MB+)
 - **Flash**: 最小 8MB (推荐 16MB+)
@@ -56,6 +59,7 @@
 - `nftables` - 现代防火墙工具
 - `kmod-nft-core` - nftables 内核模块
 - `luci-base` - LuCI 基础框架
+- `luci-compat` - LuCI兼容层 (OpenWrt 23.05+必需)
 
 ## 🚀 快速安装
 

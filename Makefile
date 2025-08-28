@@ -9,7 +9,7 @@ PKG_MAINTAINER:=OpenWrt Community
 
 LUCI_TITLE:=LuCI support for Time Control
 LUCI_DESCRIPTION:=Time-based network access control for devices (ideal for parental control)
-LUCI_DEPENDS:=+nftables +kmod-nft-core +luci-base
+LUCI_DEPENDS:=+nftables +kmod-nft-core +luci-base +luci-compat
 LUCI_PKGARCH:=all
 
 PKG_BUILD_PARALLEL:=1

@@ -1,0 +1,11 @@
+{
+    "luci-app-timecontrol": {
+        "description": "Grant access to Time Control",
+        "read": {
+            "uci": [ "timecontrol" ]
+        },
+        "write": {
+            "uci": [ "timecontrol" ]
+        }
+    }
+}

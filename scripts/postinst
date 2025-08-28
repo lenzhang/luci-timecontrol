@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# 安装后脚本 - 自动启用服务
+
+# 启用服务开机自启动
+/etc/init.d/timecontrol enable
+
+# 创建默认配置文件（如果不存在）
+if [ ! -f /etc/config/timecontrol ]; then
+    touch /etc/config/timecontrol
+fi
+
+# 启动服务
+/etc/init.d/timecontrol start
+
+# 清理LuCI缓存
+rm -rf /tmp/luci-*
+
+exit 0

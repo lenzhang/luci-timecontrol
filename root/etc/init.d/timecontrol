@@ -1,68 +1,96 @@
 #!/bin/sh /etc/rc.common
 
-START=99
+# 时间访问控制服务
+
+START=95
 STOP=10
-USE_PROCD=1
+
+USE_PROCD=0
 
 CHAIN_NAME="raw_prerouting"
 
-# 清理timecontrol防火墙规则
+# 清理现有的timecontrol防火墙规则
 clean_timecontrol_rules() {
-    # 刷新raw_prerouting链中的所有规则
     nft flush chain inet fw4 $CHAIN_NAME 2>/dev/null || true
 }
 
-# 应用timecontrol防火墙规则
-apply_timecontrol_rules() {
-    local config_name="$1"
-    
-    config_get device "$config_name" device
-    config_get weekdays "$config_name" weekdays  
-    config_get start_time "$config_name" start_time
-    config_get stop_time "$config_name" stop_time
-    config_get rule_type "$config_name" rule_type
-    
-    if [ -z "$device" ] || [ -z "$start_time" ] || [ -z "$stop_time" ]; then
-        return 1
-    fi
-    
-    # 获取设备MAC地址
+# 应用单个设备的所有规则
+apply_device_rules() {
+    local device_id="$1"
     local mac_addr
-    config_get mac_addr "$device" mac
+    local enable
     
-    if [ -z "$mac_addr" ]; then
-        return 1
+    # 获取设备信息
+    config_get mac_addr "$device_id" mac
+    config_get enable "$device_id" enable "1"
+    
+    if [ -z "$mac_addr" ] || [ "$enable" != "1" ]; then
+        return
     fi
     
-    # 根据规则类型设置动作
-    local action=""
-    if [ "$rule_type" = "allow" ]; then
-        action="accept"
-    else
-        action="drop"  
-    fi
+    local has_rules=0
     
-    # 转换星期缩写为完整名称
-    convert_weekday() {
-        case "$1" in
-            Mon) echo "Monday" ;;
-            Tue) echo "Tuesday" ;;
-            Wed) echo "Wednesday" ;;
-            Thu) echo "Thursday" ;;
-            Fri) echo "Friday" ;;
-            Sat) echo "Saturday" ;;
-            Sun) echo "Sunday" ;;
-            *) echo "$1" ;;
-        esac
+    # 处理该设备的所有时间规则
+    apply_timeslot() {
+        local timeslot="$1"
+        local slot_device
+        local weekdays
+        local start_time
+        local stop_time
+        local rule_type
+        
+        config_get slot_device "$timeslot" device
+        
+        # 只处理属于当前设备的规则
+        if [ "$slot_device" != "$device_id" ]; then
+            return
+        fi
+        
+        config_get weekdays "$timeslot" weekdays
+        config_get start_time "$timeslot" start_time
+        config_get stop_time "$timeslot" stop_time
+        config_get rule_type "$timeslot" rule_type "allow"
+        
+        if [ -z "$start_time" ] || [ -z "$stop_time" ]; then
+            return
+        fi
+        
+        has_rules=1
+        
+        # 根据规则类型设置动作
+        local action="accept"
+        if [ "$rule_type" = "deny" ]; then
+            action="drop"
+        fi
+        
+        # 转换星期缩写为完整名称
+        convert_weekday() {
+            case "$1" in
+                Mon) echo "Monday" ;;
+                Tue) echo "Tuesday" ;;
+                Wed) echo "Wednesday" ;;
+                Thu) echo "Thursday" ;;
+                Fri) echo "Friday" ;;
+                Sat) echo "Saturday" ;;
+                Sun) echo "Sunday" ;;
+                *) echo "$1" ;;
+            esac
+        }
+        
+        # 为每个工作日添加规则
+        for day in $weekdays; do
+            local full_day=$(convert_weekday "$day")
+            nft add rule inet fw4 $CHAIN_NAME ether saddr "$mac_addr" meta day "$full_day" meta hour "$start_time"-"$stop_time" "$action" comment "\"timecontrol-$device_id-$day\""
+        done
     }
     
-    # 为每个工作日添加规则
-    for day in $weekdays; do
-        # 转换为完整星期名称（nftables要求）
-        local full_day=$(convert_weekday "$day")
-        # 添加时间段规则到raw_prerouting链
-        nft add rule inet fw4 $CHAIN_NAME ether saddr "$mac_addr" meta day "$full_day" meta hour "$start_time"-"$stop_time" "$action" comment "timecontrol-$device-$day"
-    done
+    # 处理所有时间段
+    config_foreach apply_timeslot timeslot
+    
+    # 如果有allow规则，添加默认drop规则
+    if [ "$has_rules" = "1" ]; then
+        nft add rule inet fw4 $CHAIN_NAME ether saddr "$mac_addr" drop comment "\"timecontrol-$device_id-default-drop\""
+    fi
 }
 
 # 重新加载所有规则
@@ -73,9 +101,11 @@ reload_rules() {
     # 确保raw_prerouting链存在
     nft add chain inet fw4 $CHAIN_NAME { type filter hook prerouting priority raw\; } 2>/dev/null || true
     
-    # 加载配置并应用规则
+    # 加载配置
     config_load timecontrol
-    config_foreach apply_timecontrol_rules timeslot
+    
+    # 为每个设备应用规则
+    config_foreach apply_device_rules device
 }
 
 start_service() {

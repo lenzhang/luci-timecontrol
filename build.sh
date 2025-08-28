@@ -1,177 +1,128 @@
 #!/bin/bash
 
-# LuCI Time Control Build Script
-# 用于构建 luci-app-timecontrol IPK 包
+# LuCI Time Control 打包脚本
 
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build"
 PKG_NAME="luci-app-timecontrol"
-PKG_VERSION="1.2.0"
-PKG_ARCH="all"
+VERSION="1.3.0"
+ARCH="all"
 
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
-}
+# 获取脚本所在目录
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-warn() {
-    echo "[WARNING] $1"
-}
+echo "Building $PKG_NAME version $VERSION..."
 
-error() {
-    echo "[ERROR] $1"
-    exit 1
-}
+# 创建临时目录
+TEMP_DIR=$(mktemp -d)
+PKG_DIR="$TEMP_DIR/$PKG_NAME"
+mkdir -p "$PKG_DIR"
 
-# 检查依赖
-check_dependencies() {
-    log "检查构建依赖..."
-    
-    local deps=("tar" "gzip")
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            error "$dep 未安装，请手动安装"
-        fi
-    done
-    
-    log "依赖检查完成"
-}
+# 创建CONTROL目录
+mkdir -p "$PKG_DIR/CONTROL"
 
-# 创建构建目录
-create_build_dir() {
-    log "创建构建目录..."
-    rm -rf "$BUILD_DIR"
-    mkdir -p "$BUILD_DIR"
-}
-
-# 构建 IPK 包
-build_ipk() {
-    local pkg_dir="$1"
-    log "构建 IPK 包..."
-    
-    cd "$pkg_dir" || error "无法进入包目录: $pkg_dir"
-    
-    # 创建 control.tar.gz
-    tar -czf control.tar.gz -C DEBIAN .
-    
-    # 创建 data.tar.gz
-    tar -czf data.tar.gz --exclude=DEBIAN .
-    
-    # 创建 debian-binary
-    echo "2.0" > debian-binary
-    
-    # 创建最终的 IPK 文件
-    local ipk_name="${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.ipk"
-    tar -czf "../$ipk_name" debian-binary control.tar.gz data.tar.gz
-    
-    cd "$SCRIPT_DIR"
-    
-    log "IPK 包构建完成: build/$ipk_name"
-}
-
-# 验证包内容
-verify_package() {
-    local ipk_file="$1"
-    log "验证包内容..."
-    
-    if [ ! -f "$ipk_file" ]; then
-        error "IPK 文件不存在: $ipk_file"
-    fi
-    
-    local size=$(du -h "$ipk_file" | cut -f1)
-    log "包大小: $size"
-    
-    # 显示包内容
-    log "包内容预览:"
-    tar -tzf "$ipk_file" | head -20
-    
-    if [ "$(tar -tzf "$ipk_file" | wc -l)" -gt 20 ]; then
-        echo "... (总共 $(tar -tzf "$ipk_file" | wc -l) 个文件)"
-    fi
-}
-
-# 主函数
-main() {
-    log "开始构建 $PKG_NAME v$PKG_VERSION"
-    
-    check_dependencies
-    create_build_dir
-    
-    # 创建包目录结构
-    log "创建包目录结构..."
-    local pkg_dir="$BUILD_DIR/${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}"
-    
-    # 创建 DEBIAN 目录和控制文件
-    mkdir -p "$pkg_dir/DEBIAN"
-    
-    # 创建 control 文件
-    cat > "$pkg_dir/DEBIAN/control" << EOF
+# 创建control文件
+cat > "$PKG_DIR/CONTROL/control" << EOC
 Package: $PKG_NAME
-Version: $PKG_VERSION
-Architecture: $PKG_ARCH
-Maintainer: OpenWrt Community
+Version: $VERSION
+Depends: libc, nftables, luci-compat
+Architecture: $ARCH
 Section: luci
 Priority: optional
-Depends: nftables, kmod-nft-core, luci-base
-Description: LuCI support for Time Control
- Time-based network access control for devices.
- Ideal for parental control to manage children's screen time.
-EOF
+Description: LuCI support for Time-based network access control
+ Allows you to control network access for devices based on time schedules.
+ Features MAC vendor detection and multiple time rules per device.
+EOC
 
-    # 创建 postinst 脚本
-    cat > "$pkg_dir/DEBIAN/postinst" << 'EOF'
+# 创建postinst脚本
+cat > "$PKG_DIR/CONTROL/postinst" << 'EOP'
 #!/bin/sh
-set -e
-if [ -f /etc/init.d/timecontrol ]; then
-    /etc/init.d/timecontrol enable
-    /etc/init.d/timecontrol start
-fi
-rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
-if pidof uhttpd >/dev/null 2>&1; then
-    /etc/init.d/uhttpd restart
-fi
-exit 0
-EOF
+# 启用服务开机自启动
+/etc/init.d/timecontrol enable 2>/dev/null
 
-    # 创建 prerm 脚本
-    cat > "$pkg_dir/DEBIAN/prerm" << 'EOF'
+# 创建默认配置文件（如果不存在）
+[ ! -f /etc/config/timecontrol ] && touch /etc/config/timecontrol
+
+# 启动服务
+/etc/init.d/timecontrol start 2>/dev/null
+
+# 清理LuCI缓存
+rm -rf /tmp/luci-* 2>/dev/null
+
+exit 0
+EOP
+chmod 755 "$PKG_DIR/CONTROL/postinst"
+
+# 创建prerm脚本
+cat > "$PKG_DIR/CONTROL/prerm" << 'EOR'
 #!/bin/sh
-set -e
-if [ -f /etc/init.d/timecontrol ]; then
-    /etc/init.d/timecontrol stop
-    /etc/init.d/timecontrol disable
-fi
-exit 0
-EOF
+# 停止服务
+/etc/init.d/timecontrol stop 2>/dev/null
 
-    chmod 755 "$pkg_dir/DEBIAN/postinst" "$pkg_dir/DEBIAN/prerm"
-    
-    # 复制文件到包目录
-    cp -r "$SCRIPT_DIR/root"/* "$pkg_dir/"
-    
-    # 设置正确的权限
-    find "$pkg_dir" -type d -exec chmod 755 {} \;
-    find "$pkg_dir" -type f -name "*.lua" -exec chmod 644 {} \;
-    find "$pkg_dir" -type f -name "*.htm" -exec chmod 644 {} \;
-    find "$pkg_dir" -type f -name "*.json" -exec chmod 644 {} \;
-    find "$pkg_dir" -type f -path "*/init.d/*" -exec chmod 755 {} \;
-    
-    build_ipk "$pkg_dir"
-    
-    local ipk_file="$BUILD_DIR/${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.ipk"
-    verify_package "$ipk_file"
-    
-    log "构建完成!"
-    echo
-    echo "安装方法:"
-    echo "1. 将 IPK 文件上传到 OpenWrt 路由器"
-    echo "2. 运行: opkg install ${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.ipk"
-    echo
-    echo "或者使用 SCP 直接安装:"
-    echo "scp $ipk_file root@<router_ip>:/tmp/"
-    echo "ssh root@<router_ip> 'opkg install /tmp/${PKG_NAME}_${PKG_VERSION}_${PKG_ARCH}.ipk'"
+# 禁用开机自启动  
+/etc/init.d/timecontrol disable 2>/dev/null
+
+exit 0
+EOR
+chmod 755 "$PKG_DIR/CONTROL/prerm"
+
+# 复制文件到包目录
+echo "Copying files..."
+
+# init.d脚本
+mkdir -p "$PKG_DIR/etc/init.d"
+cp root/etc/init.d/timecontrol "$PKG_DIR/etc/init.d/"
+chmod 755 "$PKG_DIR/etc/init.d/timecontrol"
+
+# 默认配置
+mkdir -p "$PKG_DIR/etc/config"
+touch "$PKG_DIR/etc/config/timecontrol"
+
+# LuCI控制器
+mkdir -p "$PKG_DIR/usr/lib/lua/luci/controller"
+cp root/usr/lib/lua/luci/controller/timecontrol.lua "$PKG_DIR/usr/lib/lua/luci/controller/"
+
+# LuCI视图
+mkdir -p "$PKG_DIR/usr/lib/lua/luci/view/timecontrol"
+cp root/usr/lib/lua/luci/view/timecontrol/main.htm "$PKG_DIR/usr/lib/lua/luci/view/timecontrol/"
+
+# ACL权限
+mkdir -p "$PKG_DIR/usr/share/rpcd/acl.d"
+cat > "$PKG_DIR/usr/share/rpcd/acl.d/luci-app-timecontrol.json" << 'EOA'
+{
+    "luci-app-timecontrol": {
+        "description": "Grant access to Time Control",
+        "read": {
+            "uci": [ "timecontrol" ]
+        },
+        "write": {
+            "uci": [ "timecontrol" ]
+        }
+    }
 }
+EOA
 
-# 运行主函数
-main "$@"
+# 菜单配置（LuCI2）
+mkdir -p "$PKG_DIR/usr/share/luci/menu.d"
+cp root/usr/share/luci/menu.d/luci-app-timecontrol.json "$PKG_DIR/usr/share/luci/menu.d/" 2>/dev/null || true
+
+# 构建IPK包
+echo "Building IPK package..."
+cd "$TEMP_DIR"
+
+# 使用GNU tar确保兼容性
+tar -czf "$PKG_NAME/data.tar.gz" -C "$PKG_NAME" --exclude=CONTROL --numeric-owner .
+tar -czf "$PKG_NAME/control.tar.gz" -C "$PKG_NAME/CONTROL" --numeric-owner .
+echo "2.0" > "$PKG_NAME/debian-binary"
+
+# 创建IPK
+cd "$TEMP_DIR"
+ar -r "$PKG_NAME-${VERSION}_${ARCH}.ipk" "$PKG_NAME/debian-binary" "$PKG_NAME/control.tar.gz" "$PKG_NAME/data.tar.gz" 2>/dev/null
+
+# 移动到脚本目录
+mv "$PKG_NAME-${VERSION}_${ARCH}.ipk" "$SCRIPT_DIR/"
+
+# 清理
+cd "$SCRIPT_DIR"
+rm -rf "$TEMP_DIR"
+
+echo "Package built: $PKG_NAME-${VERSION}_${ARCH}.ipk"
+ls -lh "$PKG_NAME-${VERSION}_${ARCH}.ipk"

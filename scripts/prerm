@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# 卸载前脚本 - 清理服务
+
+# 停止服务
+/etc/init.d/timecontrol stop
+
+# 禁用开机自启动
+/etc/init.d/timecontrol disable
+
+exit 0

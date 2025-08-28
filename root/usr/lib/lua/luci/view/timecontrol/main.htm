@@ -1,3 +1,9 @@
+<%+header%>
+
+<%
+local token = luci.dispatcher.context.authtoken or ""
+%>
+
 <style>
 .time-control-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
 .time-control-table th, .time-control-table td { padding: 10px; text-align: left; border: 1px solid #ddd; }
@@ -46,6 +52,99 @@
             local sys = require "luci.sys"
             local json = require "luci.jsonc"
             
+            -- MAC厂商识别函数
+            function get_mac_vendor(mac)
+                if not mac then return "" end
+                local prefix = mac:sub(1,8):upper():gsub(":", "")
+                
+                -- 常见MAC地址前缀对应厂商
+                local vendors = {
+                    ["7811DC"] = "Sony",
+                    ["103D0A"] = "TCL/Roku",
+                    ["F49D8A"] = "Anker",
+                    ["001018"] = "Broadcom",
+                    ["0019D2"] = "Huawei",
+                    ["00E04C"] = "Realtek",
+                    ["0050F2"] = "Microsoft",
+                    ["001B21"] = "Intel",
+                    ["00C0CA"] = "Intel",
+                    ["001DD8"] = "Microsoft",
+                    ["984FEE"] = "Apple",
+                    ["F0B479"] = "Apple",
+                    ["ACBC32"] = "Apple",
+                    ["94BF2D"] = "Apple",
+                    ["3CE072"] = "Apple",
+                    ["685B35"] = "Apple",
+                    ["A8BE27"] = "Apple",
+                    ["50ED3C"] = "Apple",
+                    ["DC2C26"] = "Apple",
+                    ["88E9FE"] = "Apple",
+                    ["849866"] = "Samsung",
+                    ["A0CC2B"] = "Samsung",
+                    ["3065EC"] = "Samsung",
+                    ["54880E"] = "Samsung",
+                    ["B47C9C"] = "Amazon",
+                    ["747548"] = "Amazon",
+                    ["0C47C9"] = "Amazon",
+                    ["F0272D"] = "Amazon",
+                    ["74C63B"] = "Amazon",
+                    ["84D6D0"] = "Amazon",
+                    ["44650D"] = "Amazon",
+                    ["08ED02"] = "Amazon",
+                    ["AC63BE"] = "Amazon",
+                    ["50F5DA"] = "Amazon",
+                    ["00FC8B"] = "Amazon",
+                    ["88C9D0"] = "Xiaomi",
+                    ["286C07"] = "Xiaomi", 
+                    ["F0B429"] = "Xiaomi",
+                    ["9C99A0"] = "Xiaomi",
+                    ["185936"] = "Xiaomi",
+                    ["98FAE3"] = "Xiaomi",
+                    ["640980"] = "Xiaomi",
+                    ["8C882B"] = "Xiaomi",
+                    ["00EC0A"] = "Xiaomi",
+                    ["70BB3E"] = "Xiaomi",
+                    ["50EC50"] = "Xiaomi",
+                    ["8CEBE6"] = "Xiaomi",
+                    ["9CEFD5"] = "Oppo",
+                    ["1C687E"] = "Oppo",
+                    ["8C6D50"] = "Oppo",
+                    ["E8BBA8"] = "Oppo",
+                    ["ACCB51"] = "Oppo/OnePlus",
+                    ["886AB1"] = "vivo",
+                    ["C46516"] = "vivo",
+                    ["00A0C9"] = "Intel",
+                    ["D4E8B2"] = "Tuya",
+                    ["D4A651"] = "Tuya",
+                    ["7CF666"] = "Tuya",
+                    ["508A06"] = "Tuya",
+                    ["D8F15B"] = "Tuya",
+                    ["68572D"] = "Tuya",
+                    ["1869D8"] = "Tuya",
+                    ["70B3D5ECF"] = "ESP32/ESP8266",
+                    ["246F28"] = "ESP32",
+                    ["2462AB"] = "ESP8266",
+                    ["2CF432"] = "ESP8266",
+                    ["5CCF7F"] = "ESP8266",
+                    ["18FE34"] = "ESP8266",
+                    ["60019F"] = "ESP8266",
+                    ["A020A6"] = "ESP8266",
+                    ["54880E"] = "Samsung",
+                    ["AC2B6E"] = "Intel NUC",
+                    ["4CCC6A"] = "Intel NUC",
+                    ["F8633F"] = "Intel NUC"
+                }
+                
+                -- 尝试6位前缀匹配
+                local prefix6 = mac:sub(1,8):upper():gsub(":", "")
+                if vendors[prefix6] then
+                    return vendors[prefix6]
+                end
+                
+                -- 如果未找到，返回MAC前缀供参考
+                return ""
+            end
+            
             -- 获取DHCP租约信息
             local dhcp_leases = {}
             local f = io.open("/tmp/dhcp.leases", "r")
@@ -79,11 +178,18 @@
             local devices = {}
             for mac, ip in pairs(arp_table) do
                 local device_name = "未知设备"
+                local vendor = get_mac_vendor(mac)
+                
                 if dhcp_leases[mac] and dhcp_leases[mac].name then
                     device_name = dhcp_leases[mac].name
+                elseif vendor ~= "" then
+                    -- 如果没有DHCP名称但有厂商信息，使用厂商作为设备名
+                    device_name = vendor .. "设备"
                 end
+                
                 devices[mac] = {
                     name = device_name,
+                    vendor = vendor,
                     ip = ip,
                     mac = mac
                 }
@@ -97,11 +203,17 @@
             table.sort(sorted_devices, function(a, b) return a.name < b.name end)
             
             for _, device in ipairs(sorted_devices) do
+                local display_name = device.name
+                if device.vendor ~= "" and not device.name:find(device.vendor) then
+                    -- 如果有厂商信息且设备名中不包含厂商，添加厂商标记
+                    display_name = display_name .. " [" .. device.vendor .. "]"
+                end
+                
                 write(string.format(
                     '<option value="%s (%s)">%s - %s (%s)</option>',
                     device.name,
                     device.mac,
-                    device.name,
+                    display_name,
                     device.ip,
                     device.mac
                 ))
@@ -184,7 +296,7 @@
         </tr>
                 ]], device.name or "未知", device.mac or "", weekdays_display, 
                 s.start_time or "", s.stop_time or "", 
-                device.enable == "1" and "启用" or "禁用", s.device))
+                device.enable == "1" and "启用" or "禁用", s[".name"]))
             end
         end)
         %>
@@ -243,77 +355,50 @@ function addRule(event) {
     
     // 使用AJAX发送请求
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', window.location.href, true);
+    xhr.open('POST', '<%=luci.dispatcher.build_url("admin", "services", "timecontrol")%>', true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     
     xhr.onreadystatechange = function() {
         if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-                try {
-                    var response = JSON.parse(xhr.responseText);
-                    if (response.success) {
-                        alert('添加成功！');
-                        // 重新加载页面以显示新规则
-                        window.location.reload();
-                    } else {
-                        alert('添加失败: ' + response.message);
-                    }
-                } catch (e) {
-                    alert('添加成功！页面将刷新');
-                    window.location.reload();
-                }
-            } else {
-                alert('请求失败，请重试');
-            }
+            // 不管什么响应，只要请求完成就刷新
+            window.location.reload();
         }
     };
     
     var params = 'action=add&device=' + encodeURIComponent(device) + 
                  '&weekdays=' + encodeURIComponent(weekdays.join(' ')) +
                  '&start_time=' + encodeURIComponent(start_time) +
-                 '&stop_time=' + encodeURIComponent(stop_time);
+                 '&stop_time=' + encodeURIComponent(stop_time) +
+                 '&token=' + encodeURIComponent('<%=token%>');
     
     xhr.send(params);
     return false;
 }
 
-function deleteRule(event, deviceId) {
+function deleteRule(event, ruleId) {
     // 阻止默认事件
     event.preventDefault();
     event.stopPropagation();
     
-    if (!confirm('确定要删除该设备的控制规则吗？')) {
+    if (!confirm('确定要删除该控制规则吗？')) {
         return false;
     }
     
     // 使用AJAX发送删除请求
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', window.location.href, true);
+    xhr.open('POST', '<%=luci.dispatcher.build_url("admin", "services", "timecontrol")%>', true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     
     xhr.onreadystatechange = function() {
         if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-                try {
-                    var response = JSON.parse(xhr.responseText);
-                    if (response.success) {
-                        alert('删除成功！');
-                        // 重新加载页面
-                        window.location.reload();
-                    } else {
-                        alert('删除失败: ' + response.message);
-                    }
-                } catch (e) {
-                    alert('删除成功！页面将刷新');
-                    window.location.reload();
-                }
-            } else {
-                alert('请求失败，请重试');
-            }
+            // 不管什么响应，只要请求完成就刷新
+            window.location.reload();
         }
     };
     
-    xhr.send('action=delete&device_id=' + encodeURIComponent(deviceId));
+    xhr.send('action=delete&rule_id=' + encodeURIComponent(ruleId) + '&token=' + encodeURIComponent('<%=token%>'));
     return false;
 }
 </script>
+
+<%+footer%>

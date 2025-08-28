@@ -34,6 +34,8 @@ start_openwrt() {
         --name "$CONTAINER_NAME" \
         --platform linux/amd64 \
         --privileged \
+        -p 8080:80 \
+        -p 8443:443 \
         -v "$SCRIPT_DIR:/mnt" \
         openwrt/rootfs:x86-64-23.05.4 \
         tail -f /dev/null
@@ -58,8 +60,14 @@ install_base() {
     
     # 安装必要的包
     docker exec "$CONTAINER_NAME" sh -c "
+        # 创建lock目录
+        mkdir -p /var/lock
+        
         # 安装nftables相关
         opkg install kmod-nft-core nftables 2>/dev/null || echo 'nftables安装失败'
+        
+        # 安装LuCI和web服务器
+        opkg install luci luci-base uhttpd 2>/dev/null || echo 'LuCI安装失败'
         
         # 创建必要的目录
         mkdir -p /etc/config
@@ -71,6 +79,10 @@ install_base() {
         # 初始化防火墙表（如果需要）
         nft add table inet fw4 2>/dev/null || true
         nft add chain inet fw4 raw_prerouting { type filter hook prerouting priority raw \; } 2>/dev/null || true
+        
+        # 配置并启动uhttpd
+        [ -f /etc/init.d/uhttpd ] && /etc/init.d/uhttpd enable
+        [ -f /etc/init.d/uhttpd ] && /etc/init.d/uhttpd start
     "
     
     log "✅ 基础环境安装完成"
@@ -190,10 +202,10 @@ test_blocking() {
         # 添加测试MAC的阻止规则
         nft add rule inet fw4 raw_prerouting \
             ether saddr aa:bb:cc:dd:ee:ff \
-            meta day "Mon" \
+            meta day "Monday" \
             meta hour "00:00-23:59" \
             drop \
-            comment "timecontrol-test-device-Mon"
+            comment "timecontrol-test-device-Monday"
         
         # 验证规则是否添加
         if nft list chain inet fw4 raw_prerouting | grep -q "aa:bb:cc:dd:ee:ff"; then
