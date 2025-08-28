@@ -42,10 +42,26 @@ apply_timecontrol_rules() {
         action="drop"  
     fi
     
+    # 转换星期缩写为完整名称
+    convert_weekday() {
+        case "$1" in
+            Mon) echo "Monday" ;;
+            Tue) echo "Tuesday" ;;
+            Wed) echo "Wednesday" ;;
+            Thu) echo "Thursday" ;;
+            Fri) echo "Friday" ;;
+            Sat) echo "Saturday" ;;
+            Sun) echo "Sunday" ;;
+            *) echo "$1" ;;
+        esac
+    }
+    
     # 为每个工作日添加规则
     for day in $weekdays; do
+        # 转换为完整星期名称（nftables要求）
+        local full_day=$(convert_weekday "$day")
         # 添加时间段规则到raw_prerouting链
-        nft add rule inet fw4 $CHAIN_NAME ether saddr "$mac_addr" meta day "$day" meta hour "$start_time"-"$stop_time" "$action" comment "timecontrol-$device-$day"
+        nft add rule inet fw4 $CHAIN_NAME ether saddr "$mac_addr" meta day "$full_day" meta hour "$start_time"-"$stop_time" "$action" comment "timecontrol-$device-$day"
     done
 }
 
