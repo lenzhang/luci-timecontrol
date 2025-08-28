@@ -1,0 +1,13 @@
+
+config device 'sony_tv'
+	option name 'Sony电视'
+	option mac '78:11:DC:92:9A:D8'
+	option enable '1'
+
+config timeslot 'rule_sony'
+	option device 'sony_tv'
+	option weekdays 'Mon Tue Wed Thu Fri Sat Sun'
+	option start_time '12:00'
+	option stop_time '13:00'
+	option rule_type 'allow'
+

@@ -1,0 +1,21 @@
+# Build outputs
+build/luci-app-timecontrol_*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Editor files
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Logs
+*.log

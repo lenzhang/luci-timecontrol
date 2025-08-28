@@ -1,0 +1,83 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+CHAIN_NAME="raw_prerouting"
+
+# 清理timecontrol防火墙规则
+clean_timecontrol_rules() {
+    # 刷新raw_prerouting链中的所有规则
+    nft flush chain inet fw4 $CHAIN_NAME 2>/dev/null || true
+}
+
+# 应用timecontrol防火墙规则
+apply_timecontrol_rules() {
+    local config_name="$1"
+    
+    config_get device "$config_name" device
+    config_get weekdays "$config_name" weekdays  
+    config_get start_time "$config_name" start_time
+    config_get stop_time "$config_name" stop_time
+    config_get rule_type "$config_name" rule_type
+    
+    if [ -z "$device" ] || [ -z "$start_time" ] || [ -z "$stop_time" ]; then
+        return 1
+    fi
+    
+    # 获取设备MAC地址
+    local mac_addr
+    config_get mac_addr "$device" mac
+    
+    if [ -z "$mac_addr" ]; then
+        return 1
+    fi
+    
+    # 根据规则类型设置动作
+    local action=""
+    if [ "$rule_type" = "allow" ]; then
+        action="accept"
+    else
+        action="drop"  
+    fi
+    
+    # 为每个工作日添加规则
+    for day in $weekdays; do
+        # 添加时间段规则到raw_prerouting链
+        nft add rule inet fw4 $CHAIN_NAME ether saddr "$mac_addr" meta day "$day" meta hour "$start_time"-"$stop_time" "$action" comment "timecontrol-$device-$day"
+    done
+}
+
+# 重新加载所有规则
+reload_rules() {
+    # 先清理现有规则
+    clean_timecontrol_rules
+    
+    # 确保raw_prerouting链存在
+    nft add chain inet fw4 $CHAIN_NAME { type filter hook prerouting priority raw\; } 2>/dev/null || true
+    
+    # 加载配置并应用规则
+    config_load timecontrol
+    config_foreach apply_timecontrol_rules timeslot
+}
+
+start_service() {
+    reload_rules
+    echo "timecontrol service started"
+}
+
+stop_service() {
+    clean_timecontrol_rules
+    echo "timecontrol service stopped"
+}
+
+reload_service() {
+    reload_rules
+    echo "timecontrol rules reloaded"
+}
+
+boot() {
+    # 启动时延迟执行，确保网络和防火墙已初始化
+    ( sleep 10; start_service ) &
+}

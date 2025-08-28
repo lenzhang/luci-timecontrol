@@ -1,0 +1,319 @@
+<style>
+.time-control-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+.time-control-table th, .time-control-table td { padding: 10px; text-align: left; border: 1px solid #ddd; }
+.time-control-table th { background: #f0f0f0; }
+.btn-add { background: #4CAF50; color: white; padding: 8px 16px; border: none; cursor: pointer; margin: 10px 0; }
+
+.btn-select-all {
+    background: #007bff;
+    color: white;
+    border: 1px solid #007bff;
+    padding: 5px 12px;
+    margin: 2px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-select-all:hover {
+    background: #0056b3;
+    border-color: #0056b3;
+}
+
+.btn-select-all:active {
+    transform: translateY(1px);
+}
+.btn-delete { background: #f44336; color: white; padding: 5px 10px; border: none; cursor: pointer; }
+.add-form { background: #f9f9f9; padding: 15px; margin: 10px 0; border: 1px solid #ddd; }
+.form-row { margin: 10px 0; }
+.form-row label { display: inline-block; width: 100px; }
+/* 周选择样式 */.weekday-container {    display: flex;    flex-wrap: wrap;    gap: 8px;    margin: 15px 0;    justify-content: center;}.weekday-container label {    display: flex;    align-items: center;    background: #f8f9fa;    padding: 8px 12px;    border: 1px solid #dee2e6;    border-radius: 4px;    cursor: pointer;    transition: all 0.2s;    min-width: 60px;    justify-content: center;}.weekday-container label:hover {    background: #e9ecef;    border-color: #007bff;}.weekday-container input[type="checkbox"] {    margin-right: 6px;}.weekday-container input[type="checkbox"]:checked + span {    color: #007bff;    font-weight: bold;}/* 移动端优化 */@media (max-width: 768px) {    .weekday-container {        display: grid;        grid-template-columns: repeat(2, 1fr);        gap: 10px;        margin: 15px 0;        padding: 0 5px;    }        .weekday-container label {        background: #f8f9fa;        padding: 12px 16px;        border: 2px solid #dee2e6;        border-radius: 6px;        font-size: 16px;        min-height: 48px;    }        .weekday-container input[type="checkbox"] {        margin-right: 8px;        transform: scale(1.2);    }}
+/* 隐藏页面底部的保存按钮 */
+.cbi-page-actions { display: none !important; }
+</style>
+
+<h3>设备时间控制列表</h3>
+
+<!-- 添加表单 - 直接显示 -->
+<div id="add-form" class="add-form">
+    <h4>添加新的时间控制规则</h4>
+    <div class="form-row">
+        <label>选择设备:</label>
+        <select id="new_device" style="width: 300px;">
+            <option value="">-- 请选择设备 --</option>
+            <%
+            local sys = require "luci.sys"
+            local json = require "luci.jsonc"
+            
+            -- 获取DHCP租约信息
+            local dhcp_leases = {}
+            local f = io.open("/tmp/dhcp.leases", "r")
+            if f then
+                for line in f:lines() do
+                    local fields = {}
+                    for field in line:gmatch("%S+") do
+                        table.insert(fields, field)
+                    end
+                    if #fields >= 4 then
+                        dhcp_leases[fields[2]] = {
+                            name = fields[4] ~= "*" and fields[4] or nil,
+                            ip = fields[3]
+                        }
+                    end
+                end
+                f:close()
+            end
+            
+            -- 获取ARP表信息
+            local arp_table = {}
+            local arp_output = sys.exec("cat /proc/net/arp | tail -n +2")
+            for line in arp_output:gmatch("[^\n]+") do
+                local ip, type, flags, mac, mask, device = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+                if ip and mac and mac ~= "00:00:00:00:00:00" then
+                    arp_table[mac] = ip
+                end
+            end
+            
+            -- 合并设备信息
+            local devices = {}
+            for mac, ip in pairs(arp_table) do
+                local device_name = "未知设备"
+                if dhcp_leases[mac] and dhcp_leases[mac].name then
+                    device_name = dhcp_leases[mac].name
+                end
+                devices[mac] = {
+                    name = device_name,
+                    ip = ip,
+                    mac = mac
+                }
+            end
+            
+            -- 排序并输出选项
+            local sorted_devices = {}
+            for mac, device in pairs(devices) do
+                table.insert(sorted_devices, device)
+            end
+            table.sort(sorted_devices, function(a, b) return a.name < b.name end)
+            
+            for _, device in ipairs(sorted_devices) do
+                write(string.format(
+                    '<option value="%s (%s)">%s - %s (%s)</option>',
+                    device.name,
+                    device.mac,
+                    device.name,
+                    device.ip,
+                    device.mac
+                ))
+            end
+            %>
+        </select>
+    </div>
+    
+    <div class="form-row">
+        <label>生效日期:</label>
+    <div class="form-row">
+        <button type="button" onclick="selectAllDays(true)" class="btn-select-all">全选</button>
+        <button type="button" onclick="selectAllDays(false)" class="btn-select-all">全不选</button>
+        <button type="button" onclick="selectWorkdays()" class="btn-select-all">工作日</button>
+        <button type="button" onclick="selectWeekends()" class="btn-select-all">周末</button>
+    </div>
+<div class="weekday-container">        <label><input type="checkbox" id="weekday_Mon"><span>周一</span></label>        <label><input type="checkbox" id="weekday_Tue"><span>周二</span></label>        <label><input type="checkbox" id="weekday_Wed"><span>周三</span></label>        <label><input type="checkbox" id="weekday_Thu"><span>周四</span></label>        <label><input type="checkbox" id="weekday_Fri"><span>周五</span></label>        <label><input type="checkbox" id="weekday_Sat"><span>周六</span></label>        <label><input type="checkbox" id="weekday_Sun"><span>周日</span></label>    </div>
+    </div>
+    
+    <div class="form-row">
+        <label>开始时间:</label>
+        <input type="time" id="start_time" />
+        
+        <label style="margin-left: 20px;">结束时间:</label>
+        <input type="time" id="stop_time" />
+    </div>
+    
+    <div class="form-row">
+        <button type="button" onclick="addRule(event)" class="btn-add">提交</button>
+    </div>
+</div>
+
+<!-- 规则列表 -->
+<table class="time-control-table" id="rules-table">
+    <thead>
+        <tr>
+            <th>设备</th>
+            <th>MAC地址</th>
+            <th>生效日期</th>
+            <th>允许时间</th>
+            <th>状态</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        <%
+        local uci = require "luci.model.uci".cursor()
+        
+        -- 获取所有设备
+        local devices = {}
+        uci:foreach("timecontrol", "device", function(s)
+            devices[s[".name"]] = s
+        end)
+        
+        -- 获取并显示时间规则
+        uci:foreach("timecontrol", "timeslot", function(s)
+            local device = devices[s.device]
+            if device then
+                local weekdays_display = ""
+                if s.weekdays then
+                    for day in s.weekdays:gmatch("%S+") do
+                        local day_map = {
+                            Mon = "周一", Tue = "周二", Wed = "周三", Thu = "周四",
+                            Fri = "周五", Sat = "周六", Sun = "周日"
+                        }
+                        weekdays_display = weekdays_display .. (day_map[day] or day) .. " "
+                    end
+                end
+                
+                write(string.format([[
+        <tr>
+            <td>%s</td>
+            <td>%s</td>
+            <td>%s</td>
+            <td>%s - %s</td>
+            <td>%s</td>
+            <td>
+                <button onclick="deleteRule(event, '%s')" class="btn-delete">删除</button>
+            </td>
+        </tr>
+                ]], device.name or "未知", device.mac or "", weekdays_display, 
+                s.start_time or "", s.stop_time or "", 
+                device.enable == "1" and "启用" or "禁用", s.device))
+            end
+        end)
+        %>
+    </tbody>
+</table>
+
+<script>
+// 全选/全不选功能
+function selectAllDays(select) {
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].forEach(function(day) {
+        document.getElementById("weekday_" + day).checked = select;
+    });
+}
+
+// 工作日选择
+function selectWorkdays() {
+    // 先全不选
+    selectAllDays(false);
+    // 选中工作日
+    ["Mon", "Tue", "Wed", "Thu", "Fri"].forEach(function(day) {
+        document.getElementById("weekday_" + day).checked = true;
+    });
+}
+
+// 周末选择
+function selectWeekends() {
+    // 先全不选
+    selectAllDays(false);
+    // 选中周末
+    ["Sat", "Sun"].forEach(function(day) {
+        document.getElementById("weekday_" + day).checked = true;
+    });
+}
+
+function addRule(event) {
+    // 阻止默认事件
+    event.preventDefault();
+    event.stopPropagation();
+    
+    var device = document.getElementById('new_device').value;
+    var start_time = document.getElementById('start_time').value;
+    var stop_time = document.getElementById('stop_time').value;
+    
+    // 获取选中的星期
+    var weekdays = [];
+    ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(function(day) {
+        if (document.getElementById('weekday_' + day).checked) {
+            weekdays.push(day);
+        }
+    });
+    
+    if (!device || weekdays.length === 0 || !start_time || !stop_time) {
+        alert('请填写完整信息');
+        return false;
+    }
+    
+    // 使用AJAX发送请求
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', window.location.href, true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+                try {
+                    var response = JSON.parse(xhr.responseText);
+                    if (response.success) {
+                        alert('添加成功！');
+                        // 重新加载页面以显示新规则
+                        window.location.reload();
+                    } else {
+                        alert('添加失败: ' + response.message);
+                    }
+                } catch (e) {
+                    alert('添加成功！页面将刷新');
+                    window.location.reload();
+                }
+            } else {
+                alert('请求失败，请重试');
+            }
+        }
+    };
+    
+    var params = 'action=add&device=' + encodeURIComponent(device) + 
+                 '&weekdays=' + encodeURIComponent(weekdays.join(' ')) +
+                 '&start_time=' + encodeURIComponent(start_time) +
+                 '&stop_time=' + encodeURIComponent(stop_time);
+    
+    xhr.send(params);
+    return false;
+}
+
+function deleteRule(event, deviceId) {
+    // 阻止默认事件
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (!confirm('确定要删除该设备的控制规则吗？')) {
+        return false;
+    }
+    
+    // 使用AJAX发送删除请求
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', window.location.href, true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+                try {
+                    var response = JSON.parse(xhr.responseText);
+                    if (response.success) {
+                        alert('删除成功！');
+                        // 重新加载页面
+                        window.location.reload();
+                    } else {
+                        alert('删除失败: ' + response.message);
+                    }
+                } catch (e) {
+                    alert('删除成功！页面将刷新');
+                    window.location.reload();
+                }
+            } else {
+                alert('请求失败，请重试');
+            }
+        }
+    };
+    
+    xhr.send('action=delete&device_id=' + encodeURIComponent(deviceId));
+    return false;
+}
+</script>

@@ -1,0 +1,14 @@
+{
+    "admin/network/timecontrol": {
+        "title": "Time Control",
+        "order": 60,
+        "action": {
+            "type": "template",
+            "path": "timecontrol/main"
+        },
+        "depends": {
+            "acl": [ "luci-app-timecontrol" ],
+            "uci": [ "timecontrol" ]
+        }
+    }
+}
