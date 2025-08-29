@@ -18,4 +18,7 @@ build/luci-app-timecontrol_*
 .idea/
 
 # Logs
-*.log
+*.log*.ipk
+*.tar.gz
+test/
+build/
